@@ -1,0 +1,150 @@
+name: Cypress Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # install and run component and integration tests
+  install:
+    runs-on: ubuntu-latest
+    container:
+      image: cypress/browsers:node-18.14.1-chrome-110.0.5481.96-1-ff-109.0-edge-110.0.1587.41-1
+      options: --user 1001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Cypress install
+        uses: cypress-io/github-action@v4
+        with:
+          runTests: false
+      # report machine parameters
+      - run: npm -v
+      - run: node -v
+      - run: node -p 'os.cpus()'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: "Create env file"
+        run: echo "${{ secrets.ENV_FILE }}" > .env.local
+
+      - name: Build the app
+        run: npm run build
+
+      - name: Run Component and Integration Tests
+        run: npm run test:component
+
+      - name: Save build folder
+        uses: actions/upload-artifact@v3
+        with:
+          name: build
+          if-no-files-found: error
+          path: .next
+          retention-days: 3
+
+  ui-chrome-tests:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    container:
+      image: cypress/browsers:node-18.14.1-chrome-110.0.5481.96-1-ff-109.0-edge-110.0.1587.41-1
+      options: --user 1001
+    needs: install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download the build folders
+        uses: actions/download-artifact@v3
+        with:
+          name: build
+          path: .next
+
+      - name: Cypress info
+        run: npx cypress info
+
+      - name: npm info
+        run: npm -v
+      - name: Node info
+        run: node -v
+
+      - name: "Create env file"
+        run: echo "${{ secrets.ENV_FILE }}" > .env.local
+
+      - name: "UI Tests - Chrome"
+        uses: cypress-io/github-action@v4
+        with:
+          start: npm run dev
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+          browser: chrome
+          record: false
+          spec: "cypress/e2e"
+          config-file: cypress.config.js
+
+  ui-edge-tests:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    container:
+      image: cypress/browsers:node-18.14.1-chrome-110.0.5481.96-1-ff-109.0-edge-110.0.1587.41-1
+      options: --user 1001
+    needs: install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download the build folders
+        uses: actions/download-artifact@v3
+        with:
+          name: build
+          path: .next
+
+      - name: "Create env file"
+        run: echo "${{ secrets.ENV_FILE }}" > .env.local
+
+      - name: "UI Tests - Edge"
+        uses: cypress-io/github-action@v4
+        with:
+          start: npm run dev
+          wait-on: "http://localhost:3000"
+          wait-on-timeout: 120
+          browser: edge
+          record: false
+          spec: "cypress/e2e"
+          config-file: cypress.config.js
+
+  run-linters:
+    name: Run linters
+    runs-on: ubuntu-latest
+    needs:
+      - ui-chrome-tests
+      - ui-edge-tests
+
+    permissions:
+      checks: write
+      contents: write
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 14
+
+      # ESLint and Prettier must be in `package.json`
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Run linters
+        uses: wearerequired/lint-action@v2
+        with:
+          auto_fix: true
+          eslint: true
+          prettier: true
